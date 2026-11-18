@@ -20,7 +20,7 @@ class Rail:
         self.db.execute(
             "CREATE TABLE IF NOT EXISTS operations ("
             " op_key TEXT PRIMARY KEY, params TEXT NOT NULL,"
-            " result TEXT, receipt_id TEXT, created_at REAL NOT NULL)"
+            " result TEXT, receipt_id TEXT, pending_tx TEXT, created_at REAL NOT NULL)"
         )
         self.db.commit()
 
@@ -38,6 +38,18 @@ class Rail:
             return "proceed"
         return "replay" if row[0] is not None else "unknown"
 
+    def mark_sent(self, op_key: str, tx_hash: str) -> None:
+        """Record the broadcast transaction BEFORE waiting on its result.
+
+        This is what creates the honest middle state: the record exists, a
+        transaction is in flight, and no result is committed yet.
+        """
+        self.db.execute(
+            "UPDATE operations SET pending_tx = ? WHERE op_key = ?",
+            (tx_hash, op_key),
+        )
+        self.db.commit()
+
     def complete(self, op_key: str, result: dict, receipt_id: str) -> None:
         self.db.execute(
             "UPDATE operations SET result = ?, receipt_id = ? WHERE op_key = ?",
@@ -47,7 +59,7 @@ class Rail:
 
     def lookup(self, op_key: str):
         row = self.db.execute(
-            "SELECT params, result, receipt_id FROM operations WHERE op_key = ?",
+            "SELECT params, result, receipt_id, pending_tx FROM operations WHERE op_key = ?",
             (op_key,),
         ).fetchone()
         if row is None:
@@ -56,4 +68,5 @@ class Rail:
             "params": json.loads(row[0]),
             "result": json.loads(row[1]) if row[1] is not None else None,
             "receipt_id": row[2],
+            "pending_tx": row[3],
         }
